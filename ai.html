@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 분리수거 도우미</title>
+    <style>
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            background-color: #1a2536; 
+            font-family: 'Malgun Gothic', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-sizing: border-box;
+        }
+
+        .container {
+            background-color: #ffffff;
+            width: 90%;
+            max-width: 450px;
+            padding: 30px 20px;
+            border-radius: 20px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+            text-align: center;
+            border: 5px solid #6c5ce7; 
+            transition: border-color 0.4s ease;
+        }
+
+        h1 {
+            font-size: 22px;
+            color: #2c3e50;
+            margin-top: 0;
+            margin-bottom: 15px;
+        }
+
+        #start-btn {
+            background-color: #1dd1a1;
+            color: white;
+            border: none;
+            padding: 8px 20px;
+            font-size: 14px;
+            font-weight: bold;
+            border-radius: 20px;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            transition: background 0.2s;
+        }
+        #start-btn:hover {
+            background-color: #10ac84;
+        }
+
+        #webcam-container {
+            width: 280px;
+            height: 280px;
+            margin: 0 auto;
+            border-radius: 15px;
+            overflow: hidden;
+            background-color: #eee;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.1);
+        }
+        #webcam-container canvas {
+            width: 100% !important;
+            height: 100% !important;
+        }
+
+        #result-box {
+            margin-top: 20px;
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+            transition: background-color 0.4s ease;
+        }
+        #result-text {
+            font-size: 16px;
+            font-weight: bold;
+            color: #57606f;
+        }
+        #probability-text {
+            font-size: 14px;
+            color: #a4b0be;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container" id="card">
+        <h1>AI 분리수거 도우미</h1>
+        <button id="start-btn" onclick="init()">검사 시작</button>
+        
+        <div id="webcam-container"></div>
+        
+        <div id="result-box">
+            <div id="result-text">버튼을 눌러 카메라를 켜주세요.</div>
+            <div id="probability-text">확률: -</div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+
+    <script>
+        // 테스트용 구글 공식 샘플 모델 주소 (나중에 네 주소로 바꾸면 돼!)
+        const URL = "https://teachablemachine.withgoogle.com/models/v319g6m2g/";
+
+        let model, webcam, maxPredictions;
+
+        async function init() {
+            document.getElementById("start-btn").innerText = "카메라 연결 중...";
+            
+            try {
+                // 1. 카메라 장치부터 먼저 켜기 (무한 대기 방지)
+                const flip = true; 
+                webcam = new tmImage.Webcam(280, 280, flip); 
+                await webcam.setup(); 
+                await webcam.play();
+                
+                // 카메라 화면을 먼저 띄움
+                document.getElementById("webcam-container").appendChild(webcam.canvas);
+                document.getElementById("start-btn").style.display = "none"; 
+                document.getElementById("result-text").innerText = "AI 모델을 로딩하고 있습니다...";
+
+                // 2. 인공지능 모델 불러오기
+                const modelURL = URL + "model.json";
+                const metadataURL = URL + "metadata.json";
+                model = await tmImage.load(modelURL, metadataURL);
+                maxPredictions = model.getTotalClasses();
+
+                // 3. 실시간 감지 시작
+                document.getElementById("result-text").innerText = "쓰레기를 카메라에 보여주세요.";
+                window.requestAnimationFrame(loop);
+
+            } catch (e) {
+                console.error(e);
+                document.getElementById("result-text").innerText = "카메라 연결 실패. 권한을 허용했는지 확인해 주세요!";
+                document.getElementById("start-btn").innerText = "다시 시도";
+            }
+        }
+
+        async function loop() {
+            webcam.update(); 
+            await predict();
+            window.requestAnimationFrame(loop);
+        }
+
+        async function predict() {
+            if (!model) return; // 모델 로딩 전이면 패스
+            
+            const prediction = await model.predict(webcam.canvas);
+            
+            // 샘플 모델 기준 (0번째 클래스: 정상, 1번째 클래스: 불량)
+            let goodRate = prediction[0].probability;
+            let badRate = prediction[1].probability;
+
+            let card = document.getElementById("card");
+            let resultText = document.getElementById("result-text");
+            let probText = document.getElementById("probability-text");
+
+            // 80% 확률 기준 조건문 적용
+            if (goodRate > 0.80) {
+                card.style.borderColor = "#2ecc71"; 
+                resultText.style.color = "#27ae60";
+                resultText.innerText = "분리수거 성공! 깨끗하게 버려주셔서 감사합니다.";
+                probText.innerText = "정상 확률: " + Math.round(goodRate * 100) + "%";
+            } 
+            else if (badRate > 0.80) {
+                card.style.borderColor = "#e74c3c"; 
+                resultText.style.color = "#c0392b";
+                resultText.innerText = "경고! 라벨을 제거하거나 이물질을 비워주세요.";
+                probText.innerText = "불량 확률: " + Math.round(badRate * 100) + "%";
+            } 
+            else {
+                card.style.borderColor = "#6c5ce7"; 
+                resultText.style.color = "#57606f";
+                resultText.innerText = "쓰레기를 카메라에 가까이 보여주세요.";
+                probText.innerText = "대기 중...";
+            }
+        }
+    </script>
+</body>
+</html>
